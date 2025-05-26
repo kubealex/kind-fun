@@ -1,0 +1,81 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: bootc-image-sign
+spec:
+  description: |-
+    Task to sign image with SIGSTORE Cosign.
+  params:
+    - description: Reference of the image to sign.
+      name: IMAGE
+      type: string
+      default: $(params.IMAGE_NAME)
+    - description: Reference of the image tags to sign.
+      name: IMAGE_TAGS
+      type: string
+      default: $(params.IMAGE_TAGS)
+    - default: 'quay.io/kubealex/ubi-cosign:latest'
+      description: The location of the cosign container image.
+      name: COSIGN_IMAGE
+      type: string
+    - default: k8s://default/cosign-key
+      description: Location of the key to sign images
+      name: COSIGN_KEY_LOCATION
+      type: string
+    - default: redhat
+      description: Passphrase of the key to sign images
+      name: COSIGN_KEY_PWD
+      type: string
+    - default: false
+      description: Boolean to manage key generation, defaults to false
+      name: COSIGN_GENERATE_KEYS
+      type: string
+  steps:
+    - image: $(params.COSIGN_IMAGE)
+      name: sign-image
+      script: |
+        #!/usr/bin/env bash
+        set -xe
+
+        if [[ "$(workspaces.dockerconfig.bound)" == "true" ]]; then
+
+          # if config.json exists at workspace root, we use that
+          if test -f "$(workspaces.dockerconfig.path)/config.json"; then
+            export DOCKER_CONFIG="$(workspaces.dockerconfig.path)"
+
+          # else we look for .dockerconfigjson at the root
+          elif test -f "$(workspaces.dockerconfig.path)/.dockerconfigjson"; then
+            mkdir -p $HOME/.docker/
+            cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" "$HOME/.docker/config.json"
+            export DOCKER_CONFIG="$HOME/.docker"
+
+          # need to error out if neither files are present
+          else
+            echo "neither 'config.json' nor '.dockerconfigjson' found at workspace root"
+            exit 1
+          fi
+        fi
+
+        if [[ "$(params.COSIGN_GENERATE_KEYS)" == "true" ]]; then
+          cosign generate-key-pair $(params.COSIGN_KEY_LOCATION)
+        fi
+
+        for tag in $(params.IMAGE_TAGS)
+        do
+          cosign sign --yes --key $(params.COSIGN_KEY_LOCATION) $(params.IMAGE):$tag
+        done
+
+      securityContext:
+        capabilities:
+          add:
+            - SETFCAP
+        privileged: true
+      workingDir: $(workspaces.main-workspace.path)
+      env:
+      - name: COSIGN_PASSWORD
+        value: $(params.COSIGN_KEY_PWD)
+  workspaces:
+    - name: main-workspace
+    - description: An optional workspace that allows providing a .docker/config.json file for Podman to access the container registry. The file should be placed at the root of the Workspace with name config.json or .dockerconfigjson.
+      name: dockerconfig
+      optional: true

@@ -1,0 +1,19 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: image-build-binding
+spec:
+  # params:
+  # - name: gitrevision
+  #   value: $(body.head_commit.id)
+  # - name: gitrepositoryurl
+  #   value: $(body.repository.url)
+  # - name: contenttype
+  #   value: $(header.Content-Type)
+  params:
+  - name: git_sha
+    value: $(body.sha)
+  - name: git_revision
+    value: $(body.ref)
+  - name: git_url
+    value: $(body.repository.clone_url)

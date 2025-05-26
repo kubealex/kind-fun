@@ -1,0 +1,49 @@
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  labels:
+    kubevirt.io/vm: vm-bootc-kubevirt
+  name: vm-bootc-kubevirt
+spec:
+  dataVolumeTemplates:
+  - metadata:
+      creationTimestamp: null
+      name: bootc-vm-dv
+    spec:
+      pvc:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+        storageClassName: ceph-filesystem
+      source:
+        registry:
+          url: docker://quay.io/containerdisks/fedora:latest
+  runStrategy: Always
+  template:
+    metadata:
+      labels:
+        kubevirt.io/vm: vm-bootc-kubevirt
+    spec:
+      domain:
+        devices:
+          disks:
+          - disk:
+              bus: virtio
+            name: datavolumedisk1
+        resources:
+          requests:
+            memory: 2Gi
+        firmware:
+          bootloader:
+            efi:
+              secureBoot: false
+        cpu:
+          cores: 2
+      terminationGracePeriodSeconds: 0
+      volumes:
+      - dataVolume:
+          name: bootc-vm-dv
+        name: datavolumedisk1

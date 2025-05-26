@@ -1,0 +1,26 @@
+FC_NAMESPACE=flightctl
+helm upgrade --install --version=0.7.1 \
+    --namespace $FC_NAMESPACE --create-namespace \
+    flightctl oci://quay.io/flightctl/charts/flightctl \
+    --set global.exposeServicesMethod=nodePort \
+    --set global.nodePorts.api=32001 \
+    --set global.nodePorts.cliArtifacts=32002 \
+    --set global.nodePorts.agent=32003 \
+    --set global.nodePorts.ui=32004 \
+    --set global.nodePorts.keycloak=32005 \
+    --set "global.baseDomain=192.168.200.71.nip.io"
+
+FC_NAMESPACE=flightctl
+helm upgrade --install --version=0.7.1 \
+    --namespace $FC_NAMESPACE --create-namespace \
+    flightctl ./deploy/helm/flightctl/ \
+    --set global.exposeServicesMethod=nodePort \
+    --set kv.fsGroup=26 \
+    --set db.fsGroup=26 \
+    --set keycloak.db.fsGroup=26 \
+    --set global.nodePorts.api=32001 \
+    --set global.nodePorts.cliArtifacts=32002 \
+    --set global.nodePorts.agent=32003 \
+    --set global.nodePorts.ui=32004 \
+    --set global.nodePorts.keycloak=32005 \
+    --set "global.baseDomain=192.168.200.71.nip.io"

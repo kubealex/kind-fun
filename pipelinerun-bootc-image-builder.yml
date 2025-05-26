@@ -1,0 +1,32 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: bootc-image-builder-
+  namespace: default
+spec:
+  pipelineRef:
+    name: bootc-image-builder
+  params:
+    - name: SOURCE_IMAGE_NAME
+      value: quay.io/kubealex/centos-bootc-demo
+    - name: SOURCE_IMAGE_TAG
+      value: latest
+  taskRunTemplate:
+    podTemplate:
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+    serviceAccountName: default
+  workspaces:
+    - name: main-workspace
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+          storageClassName: ceph-filesystem
+    - name: registry-creds
+      secret:
+        secretName: container-auth

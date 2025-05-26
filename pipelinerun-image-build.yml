@@ -1,0 +1,53 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: build-image-
+  namespace: default
+spec:
+  # podTemplate:
+  #   securityContext:
+  #     runAsUser: 0
+  #     runAsGroup: 0
+  #     fsGroup: 65532
+  taskRunTemplate:
+    podTemplate:
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+        fsGroup: 65532
+    serviceAccountName: default
+  # taskRunSpecs:
+  #   - pipelineTaskName: git-clone
+  #     podTemplate:
+  #       securityContext:
+  #         runAsUser: 0
+  #         runAsGroup: 0
+  #         fsGroup: 0
+  params:
+    - name: GIT_REPOSITORY
+      value: https://github.com/kubealex/kind-fun.git
+    - name: GIT_REPOSITORY_BRANCH
+      value: master
+    - name: IMAGE_NAME
+      value: quay.io/kubealex/centos-bootc-demo
+    - name: IMAGE_TAGS
+      value: latest app
+    - name: COSIGN_GENERATE_KEYS
+      value: false
+  pipelineRef:
+    name: centos-bootc-image-build
+  timeouts:
+    pipeline: 1h0m0s
+  workspaces:
+    - name: repo-folder
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 2Gi
+          storageClassName: ceph-filesystem
+    - name: registry-creds
+      secret:
+        secretName: container-auth

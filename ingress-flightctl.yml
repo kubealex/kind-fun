@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: flightctl
+  namespace: flightctl
+spec:
+  rules:
+  - host: flightctl.ui
+    http:
+      paths:
+      - pathType: ImplementationSpecific
+        backend:
+          service:
+            name: flightctl-ui
+            port:
+              number: 8080

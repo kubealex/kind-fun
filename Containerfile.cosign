@@ -1,0 +1,6 @@
+FROM quay.io/lib/golang as build
+RUN go install github.com/sigstore/cosign/v2/cmd/cosign@latest
+
+FROM registry.access.redhat.com/ubi9-minimal:latest
+COPY --from=build /go/bin/cosign /bin/cosign
+CMD ["cosign"]

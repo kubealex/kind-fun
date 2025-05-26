@@ -1,0 +1,55 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: image-build-trigger
+  namespace: default
+spec:
+  params:
+  - name: git_sha
+    default: ""
+  - name: git_revision
+    default: ""
+  - name: git_url
+    default: ""
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      generateName: build-image-
+      namespace: default
+    spec:
+      taskRunTemplate:
+        podTemplate:
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            fsGroup: 65532
+        serviceAccountName: default
+      params:
+        - name: GIT_REPOSITORY
+          value: $(tt.params.git_url)
+        - name: GIT_REPOSITORY_BRANCH
+          value: main
+        - name: IMAGE_NAME
+          value: quay.io/kubealex/centos-bootc-demo
+        - name: IMAGE_TAGS
+          value: latest app $(tt.params.git_revision)
+        - name: COSIGN_GENERATE_KEYS
+          value: false
+      pipelineRef:
+        name: centos-bootc-image-build
+      timeouts:
+        pipeline: 1h0m0s
+      workspaces:
+        - name: repo-folder
+          volumeClaimTemplate:
+            spec:
+              accessModes:
+                - ReadWriteOnce
+              resources:
+                requests:
+                  storage: 2Gi
+              storageClassName: ceph-filesystem
+        - name: registry-creds
+          secret:
+            secretName: container-auth

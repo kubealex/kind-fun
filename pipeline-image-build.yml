@@ -1,0 +1,110 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: centos-bootc-image-build
+spec:
+  params:
+    - description: URL of the repository where Containerfile is stored
+      name: GIT_REPOSITORY
+      type: string
+    - default: main
+      description: URL of the repository where Containerfile is stored
+      name: GIT_REPOSITORY_BRANCH
+      type: string
+    - default: ./Containerfile
+      description: 'Containerfile path, relative'
+      name: CONTAINERFILE_PATH
+      type: string
+    - default: .
+      description: 'Podman Build Context'
+      name: BUILD_CONTEXT
+      type: string
+    - description: 'Name of the image to create, i.e. quay.io/kubealex/centos-bootc-demo'
+      name: IMAGE_NAME
+      type: string
+    - description: 'Tags, separated by a space, to apply to the image'
+      name: IMAGE_TAGS
+      type: string
+    - default: k8s://default/cosign-key
+      description: Location of the key to sign images
+      name: COSIGN_KEY_LOCATION
+      type: string
+    - default: redhat
+      description: Passphrase of the key to sign images
+      name: COSIGN_KEY_PWD
+      type: string
+    - default: false
+      description: Boolean to manage key generation, defaults to false
+      name: COSIGN_GENERATE_KEYS
+      type: string
+  tasks:
+    - name: git-clone
+      params:
+        - name: url
+          value: $(params.GIT_REPOSITORY)
+        - name: revision
+          value: $(params.GIT_REPOSITORY_BRANCH)
+      taskRef:
+        kind: Task
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: repo-folder
+    - name: bootc-image-build
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: $(params.IMAGE_TAGS)
+        - name: BUILDER_IMAGE
+          value: 'quay.io/containers/podman:latest'
+        - name: DOCKERFILE
+          value: $(params.CONTAINERFILE_PATH)
+        - name: CONTEXT
+          value: $(params.BUILD_CONTEXT)
+        - name: TLSVERIFY
+          value: 'true'
+        - name: FORMAT
+          value: oci
+        - name: BUILD_EXTRA_ARGS
+          value: ''
+        - name: PUSH_EXTRA_ARGS
+          value: ''
+        - name: SKIP_PUSH
+          value: 'false'
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: Task
+        name: bootc-image-build
+      workspaces:
+        - name: main-workspace
+          workspace: repo-folder
+        - name: dockerconfig
+          workspace: registry-creds
+
+    - name: bootc-image-sign
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: $(params.IMAGE_TAGS)
+        - name: COSIGN_KEY_LOCATION
+          value: $(params.COSIGN_KEY_LOCATION)
+        - name: COSIGN_KEY_PWD
+          value: $(params.COSIGN_KEY_PWD)
+        - name: COSIGN_GENERATE_KEYS
+          value: $(params.COSIGN_GENERATE_KEYS)
+      runAfter:
+        - bootc-image-build
+      taskRef:
+        kind: Task
+        name: bootc-image-sign
+      workspaces:
+        - name: main-workspace
+          workspace: repo-folder
+        - name: dockerconfig
+          workspace: registry-creds
+  workspaces:
+    - name: repo-folder
+    - name: registry-creds
