@@ -1,29 +1,16 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  generateName: build-image-
+  generateName: bootc-image-builder-
   namespace: default
 spec:
-  # podTemplate:
-  #   securityContext:
-  #     runAsUser: 0
-  #     runAsGroup: 0
-  #     fsGroup: 65532
-  taskRunTemplate:
-    podTemplate:
-      securityContext:
-        runAsNonRoot: false
-        runAsUser: 0
-        fsGroup: 65532
-    serviceAccountName: default
-  # taskRunSpecs:
-  #   - pipelineTaskName: git-clone
-  #     podTemplate:
-  #       securityContext:
-  #         runAsUser: 0
-  #         runAsGroup: 0
-  #         fsGroup: 0
+  pipelineRef:
+    name: bootc-end-to-end-pipeline
   params:
+    - name: SOURCE_IMAGE_NAME
+      value: quay.io/kubealex/centos-bootc-demo
+    - name: SOURCE_IMAGE_TAG
+      value: latest
     - name: GIT_REPOSITORY
       value: https://github.com/kubealex/kind-fun.git
     - name: GIT_REPOSITORY_BRANCH
@@ -34,10 +21,15 @@ spec:
       value: latest app
     - name: COSIGN_GENERATE_KEYS
       value: false
-  pipelineRef:
-    name: centos-bootc-image-build
-  timeouts:
-    pipeline: 1h0m0s
+    - name: KUBEVIRT_IMAGE_BUILD
+      value: true
+  taskRunTemplate:
+    podTemplate:
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+        fsGroup: 65532
+    serviceAccountName: default
   workspaces:
     - name: main-workspace
       volumeClaimTemplate:
@@ -46,7 +38,7 @@ spec:
             - ReadWriteOnce
           resources:
             requests:
-              storage: 2Gi
+              storage: 10Gi
           storageClassName: ceph-filesystem
     - name: registry-creds
       secret:

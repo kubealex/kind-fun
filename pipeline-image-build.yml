@@ -49,7 +49,7 @@ spec:
         name: git-clone
       workspaces:
         - name: output
-          workspace: repo-folder
+          workspace: main-workspace
     - name: bootc-image-build
       params:
         - name: IMAGE
@@ -79,7 +79,7 @@ spec:
         name: bootc-image-build
       workspaces:
         - name: main-workspace
-          workspace: repo-folder
+          workspace: main-workspace
         - name: dockerconfig
           workspace: registry-creds
 
@@ -102,9 +102,9 @@ spec:
         name: bootc-image-sign
       workspaces:
         - name: main-workspace
-          workspace: repo-folder
+          workspace: main-workspace
         - name: dockerconfig
           workspace: registry-creds
   workspaces:
-    - name: repo-folder
+    - name: main-workspace
     - name: registry-creds

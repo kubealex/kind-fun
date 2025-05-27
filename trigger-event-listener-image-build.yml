@@ -9,4 +9,21 @@ spec:
       bindings:
       - ref: image-build-binding
       template:
+        ref: bootc-image-builder-trigger
+      interceptors:
+      - ref:
+          name: cel
+        params:
+        - name: filter
+          value: body['ref'].contains("qcow")
+    - name: image-build-initiator
+      bindings:
+      - ref: image-build-binding
+      template:
         ref: image-build-trigger
+      interceptors:
+      - ref:
+          name: cel
+        params:
+        - name: filter
+          value: "!(body['ref'].contains('qcow'))"

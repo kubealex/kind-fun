@@ -41,7 +41,7 @@ spec:
       timeouts:
         pipeline: 1h0m0s
       workspaces:
-        - name: repo-folder
+        - name: main-workspace
           volumeClaimTemplate:
             spec:
               accessModes:

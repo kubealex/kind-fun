@@ -5,11 +5,11 @@ metadata:
 spec:
   params:
     - default: quay.io/kubealex/centos-bootc-demo
-      name: SOURCE_IMAGE_NAME
+      name: SOURCE_IMAGE_NAME_QCOW
       type: string
       description: 'Image to convert - i.e. quay.io/kubealex/centos-bootc-demo'
     - default: kubevirt-qcow2
-      name: SOURCE_IMAGE_TAG
+      name: SOURCE_IMAGE_TAG_QCOW
       type: string
       description: 'Image tag'
     - default: centos-bootc-vm
@@ -32,9 +32,9 @@ spec:
     - name: kubernetes-actions
       params:
         - name: SOURCE_IMAGE
-          value: $(params.SOURCE_IMAGE_NAME)
+          value: $(params.SOURCE_IMAGE_NAME_QCOW)
         - name: SOURCE_IMAGE_TAG
-          value: $(params.SOURCE_IMAGE_TAG)
+          value: $(params.SOURCE_IMAGE_TAG_QCOW)
         - name: script
           value: |
             cat <<EOF | kubectl apply -f -
@@ -61,7 +61,7 @@ spec:
                     storageClassName: ceph-filesystem
                   source:
                     registry:
-                      url: docker://$(params.SOURCE_IMAGE_NAME):$(params.SOURCE_IMAGE_TAG)
+                      url: docker://$(params.SOURCE_IMAGE_NAME_QCOW):$(params.SOURCE_IMAGE_TAG_QCOW)
               template:
                 metadata:
                   labels:
