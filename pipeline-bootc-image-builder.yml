@@ -44,6 +44,10 @@ spec:
       description: Generate QCOW2 Container image for KubeVirt ContainerDisk
       name: KUBEVIRT_IMAGE_BUILD
       type: string
+    - description: Reference to logically bound images, space separated
+      name: LOGICALLY_BOUND_IMAGES
+      type: string
+      default: ""
   tasks:
     - name: bootc-image-builder
       params:
@@ -65,6 +69,8 @@ spec:
           value: $(params.AWS_S3_BUCKET)
         - name: AWS_S3_REGION
           value: $(params.AWS_S3_REGION)
+        - name: LOGICALLY_BOUND_IMAGES
+          value: $(params.LOGICALLY_BOUND_IMAGES)
       taskRef:
         kind: Task
         name: bootc-image-builder

@@ -14,6 +14,10 @@ spec:
       name: SOURCE_IMAGE_TAG
       type: string
       default: $(params.SOURCE_IMAGE_TAG)
+    - description: Reference to logically bound images, space separated
+      name: LOGICALLY_BOUND_IMAGES
+      type: string
+      default: ""
     - default: 'quay.io/centos-bootc/bootc-image-builder:latest'
       description: The location of the buildah builder image.
       name: BUILDER_IMAGE
@@ -98,7 +102,12 @@ spec:
           fi
         fi
 
-        if [[ ! -z '$(params.CONFIG_TOML_CONTENT)' ]]; then
+        if [[ -f ./config.toml ]]; then
+          BUILD_COMMAND="--config /config.toml $BUILD_COMMAND"
+          PODMAN_COMMAND="$PODMAN_COMMAND -v ./config.toml:/config.toml:ro"
+        fi
+
+        if [[ ! -z '$(params.CONFIG_TOML_CONTENT)' && ! -f ./config.toml ]]; then
           echo '$(params.CONFIG_TOML_CONTENT)' > config.toml
           BUILD_COMMAND="--config /config.toml $BUILD_COMMAND"
           PODMAN_COMMAND="$PODMAN_COMMAND -v ./config.toml:/config.toml:ro"

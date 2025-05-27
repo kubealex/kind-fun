@@ -23,6 +23,8 @@ spec:
       value: false
     - name: KUBEVIRT_IMAGE_BUILD
       value: true
+    - name: LOGICALLY_BOUND_IMAGES
+      value: quay.io/kubealex/tailwind-pos:latest
   taskRunTemplate:
     podTemplate:
       securityContext:

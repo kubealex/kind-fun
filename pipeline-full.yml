@@ -45,6 +45,10 @@ spec:
       name: SOURCE_IMAGE_TAG
       type: string
       description: 'Image tag'
+    - description: Reference to logically bound images, space separated
+      name: LOGICALLY_BOUND_IMAGES
+      type: string
+      default: ""
     - default: qcow2
       name: DESTINATION_IMAGE_FORMAT
       type: string
@@ -189,6 +193,8 @@ spec:
           value: $(params.AWS_S3_BUCKET)
         - name: AWS_S3_REGION
           value: $(params.AWS_S3_REGION)
+        - name: LOGICALLY_BOUND_IMAGES
+          value: $(params.LOGICALLY_BOUND_IMAGES)
       runAfter:
         - bootc-image-sign
       taskRef:
