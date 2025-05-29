@@ -39,13 +39,22 @@ spec:
             value: true
           - name: LOGICALLY_BOUND_IMAGES
             value: quay.io/kubealex/tailwind-pos:latest
-        taskRunTemplate:
-          podTemplate:
-            securityContext:
-              runAsNonRoot: false
-              runAsUser: 0
-              fsGroup: 65532
-          serviceAccountName: default
+        podTemplate:
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+        taskRunSpecs:
+          - pipelineTaskName: git-clone
+            podTemplate:
+              securityContext:
+                fsGroup: 65532
+        # taskRunTemplate:
+        #   podTemplate:
+        #     securityContext:
+        #       runAsNonRoot: false
+        #       runAsUser: 0
+        #       fsGroup: 65532
+        #   serviceAccountName: default
         workspaces:
           - name: main-workspace
             volumeClaimTemplate:

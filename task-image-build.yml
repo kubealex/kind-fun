@@ -95,9 +95,6 @@ spec:
         done
 
       securityContext:
-        capabilities:
-          add:
-            - SETFCAP
         privileged: true
       volumeMounts:
         - mountPath: /var/lib/containers

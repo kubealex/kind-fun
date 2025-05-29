@@ -66,9 +66,6 @@ spec:
         done
 
       securityContext:
-        capabilities:
-          add:
-            - SETFCAP
         privileged: true
       workingDir: $(workspaces.main-workspace.path)
       env:

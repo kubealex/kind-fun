@@ -130,9 +130,6 @@ spec:
 
       securityContext:
         privileged: true
-        capabilities:
-          add:
-            - SETFCAP
       volumeMounts:
         - mountPath: /var/lib/containers
           name: varlibcontainers

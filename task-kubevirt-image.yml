@@ -16,11 +16,7 @@ spec:
         ADD --chown=107:107 ./output/qcow2/disk.qcow2 /disk/
         EOF
       securityContext:
-        capabilities:
-          add:
-            - SETFCAP
         privileged: true
       workingDir: $(workspaces.main-workspace.path)
   workspaces:
     - name: main-workspace
-
