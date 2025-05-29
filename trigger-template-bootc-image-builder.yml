@@ -26,17 +26,19 @@ spec:
           - name: SOURCE_IMAGE_TAG
             value: latest
           - name: GIT_REPOSITORY
-            value: https://github.com/kubealex/kind-fun.git
+            value: $(tt.params.git_url)
           - name: GIT_REPOSITORY_BRANCH
-            value: master
+            value: main
           - name: IMAGE_NAME
             value: quay.io/kubealex/centos-bootc-demo
           - name: IMAGE_TAGS
-            value: latest app
+            value: latest app $(tt.params.git_revision)
           - name: COSIGN_GENERATE_KEYS
             value: false
           - name: KUBEVIRT_IMAGE_BUILD
             value: true
+          - name: LOGICALLY_BOUND_IMAGES
+            value: quay.io/kubealex/tailwind-pos:latest
         taskRunTemplate:
           podTemplate:
             securityContext:

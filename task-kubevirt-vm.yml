@@ -27,9 +27,9 @@ spec:
     - name: image
       default: gcr.io/cloud-builders/kubectl:latest
       description: Kubectl wrapper image
-    - name: SOURCE_IMAGE_NAME
+    - name: QCOW_IMAGE_NAME
       default: quay.io/kubealex/centos-bootc-demo
-    - name: SOURCE_IMAGE_TAG
+    - name: QCOW_IMAGE_TAG
       default: kubevirt-qcow2
     - default: centos-bootc-vm
       name: VM_NAME

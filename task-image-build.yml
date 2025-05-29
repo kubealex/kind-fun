@@ -47,13 +47,6 @@ spec:
       description: Skip pushing the built image
       name: SKIP_PUSH
       type: string
-  # results:
-  #   - description: Digest of the image just built.
-  #     name: IMAGE_DIGEST
-  #     type: string
-  #   - description: Image repository where the built image would be pushed to
-  #     name: IMAGE_URL
-  #     type: string
   steps:
     - image: $(params.BUILDER_IMAGE)
       name: build-and-push

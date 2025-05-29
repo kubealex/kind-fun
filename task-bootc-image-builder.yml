@@ -115,6 +115,13 @@ spec:
 
         mkdir -p output
 
+        if [[ ! -z '$(params.LOGICALLY_BOUND_IMAGES)' ]]; then
+          for lbi in $(params.LOGICALLY_BOUND_IMAGES)
+          do
+            podman pull $lbi
+          done
+        fi
+
         podman pull $(params.SOURCE_IMAGE):$(params.SOURCE_IMAGE_TAG)
 
         $PODMAN_COMMAND \

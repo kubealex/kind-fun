@@ -4,11 +4,6 @@ metadata:
   generateName: build-image-
   namespace: default
 spec:
-  # podTemplate:
-  #   securityContext:
-  #     runAsUser: 0
-  #     runAsGroup: 0
-  #     fsGroup: 65532
   taskRunTemplate:
     podTemplate:
       securityContext:
@@ -16,13 +11,6 @@ spec:
         runAsUser: 0
         fsGroup: 65532
     serviceAccountName: default
-  # taskRunSpecs:
-  #   - pipelineTaskName: git-clone
-  #     podTemplate:
-  #       securityContext:
-  #         runAsUser: 0
-  #         runAsGroup: 0
-  #         fsGroup: 0
   params:
     - name: GIT_REPOSITORY
       value: https://github.com/kubealex/kind-fun.git
