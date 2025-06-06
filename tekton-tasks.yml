@@ -1,0 +1,434 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: bootc-image-builder
+spec:
+  description: |-
+    Task to convert a bootc-container image to a consumable format.
+  params:
+    - description: Reference of the main-workspace bootc image
+      name: SOURCE_IMAGE
+      type: string
+      default: $(params.SOURCE_IMAGE_NAME)
+    - description: Reference of the image tags buildah will produce.
+      name: SOURCE_IMAGE_TAG
+      type: string
+      default: $(params.SOURCE_IMAGE_TAG)
+    - description: Reference to logically bound images, space separated
+      name: LOGICALLY_BOUND_IMAGES
+      type: string
+      default: ""
+    - default: 'quay.io/centos-bootc/bootc-image-builder:latest'
+      description: The location of the buildah builder image.
+      name: BUILDER_IMAGE
+      type: string
+    - default: 'qcow2'
+      description: Output format for the image
+      name: DEST_FORMAT
+      type: string
+    - default: |
+        [[customizations.user]]
+        name = "sysadmin"
+        password = "redhat"
+        groups = ["wheel"]
+      description: config.toml content for customizations
+      name: CONFIG_TOML_CONTENT
+      type: string
+    - default: 'true'
+      description: TLS Verification
+      name: TLS_VERIFY
+      type: string
+    - default: ''
+      description: AWS AMI Name
+      name: AWS_AMI_NAME
+      type: string
+    - default: ''
+      description: AWS S3 Bucket
+      name: AWS_S3_BUCKET
+      type: string
+    - default: ''
+      description: AWS S3 Region
+      name: AWS_S3_REGION
+      type: string
+  steps:
+    - image: quay.io/containers/podman
+      name: bootc-image-builder
+      script: |
+        #!/usr/bin/env bash
+        set -xe
+
+        BUILD_COMMAND="--type $(params.DEST_FORMAT) --tls-verify=$(params.TLS_VERIFY) $(params.SOURCE_IMAGE):$(params.SOURCE_IMAGE_TAG)"
+
+        PODMAN_COMMAND="podman run \
+        --device /dev/fuse:rw \
+        --rm \
+        -it \
+        --privileged \
+        --pull=newer \
+        --security-opt label=type:unconfined_t \
+        -v $(pwd)/output:/output \
+        -v /root/.docker/config.json:/run/containers/0/auth.json \
+        -v /var/lib/containers/storage:/var/lib/containers/storage"
+
+        if [[ "$(workspaces.dockerconfig.bound)" == "true" ]]; then
+
+          # if config.json exists at workspace root, we use that
+          if test -f "$(workspaces.dockerconfig.path)/config.json"; then
+            export DOCKER_CONFIG="$(workspaces.dockerconfig.path)"
+
+          # else we look for .dockerconfigjson at the root
+          elif test -f "$(workspaces.dockerconfig.path)/.dockerconfigjson"; then
+            mkdir -p $HOME/.docker/
+            cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" "$HOME/.docker/config.json"
+            export DOCKER_CONFIG="$HOME/.docker"
+
+          # need to error out if neither files are present
+          else
+            echo "neither 'config.json' nor '.dockerconfigjson' found at workspace root"
+            exit 1
+          fi
+        fi
+
+        if [[ "$(params.DEST_FORMAT)" == "ami" ]]; then
+          if [[ "$(workspaces.awscredentials.bound)" == "true" ]]; then
+            if test -f "$(workspaces.awscredentials.path)/credentials"; then
+              mkdir -p $HOME/.aws/
+              cp "$(workspaces.awscredentials.path)/credentials" "$HOME/.aws/credentials"
+              BUILD_COMMAND="--aws-ami-name $(params.AWS_AMI_NAME) --aws-bucket $(params.AWS_S3_BUCKET) --aws-region $(params.AWS_S3_REGION) $BUILD_COMMAND"
+            else
+              echo "AWS Credentials must be populated"
+              exit 1
+            fi
+          fi
+        fi
+
+        if [[ -f ./config.toml ]]; then
+          BUILD_COMMAND="--config /config.toml $BUILD_COMMAND"
+          PODMAN_COMMAND="$PODMAN_COMMAND -v ./config.toml:/config.toml:ro"
+        fi
+
+        if [[ ! -z '$(params.CONFIG_TOML_CONTENT)' && ! -f ./config.toml ]]; then
+          echo '$(params.CONFIG_TOML_CONTENT)' > config.toml
+          BUILD_COMMAND="--config /config.toml $BUILD_COMMAND"
+          PODMAN_COMMAND="$PODMAN_COMMAND -v ./config.toml:/config.toml:ro"
+        fi
+
+        mkdir -p output
+
+        if [[ ! -z '$(params.LOGICALLY_BOUND_IMAGES)' ]]; then
+          for lbi in $(params.LOGICALLY_BOUND_IMAGES)
+          do
+            podman pull $lbi
+          done
+        fi
+
+        podman pull $(params.SOURCE_IMAGE):$(params.SOURCE_IMAGE_TAG)
+
+        $PODMAN_COMMAND \
+        $(params.BUILDER_IMAGE) \
+        $BUILD_COMMAND
+
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+        - mountPath: /dev/fuse
+          name: fuse
+      workingDir: $(workspaces.main-workspace.path)
+  volumes:
+    - emptyDir: {}
+      name: varlibcontainers
+    - name: fuse
+      hostPath:
+        path: /dev/fuse
+  workspaces:
+    - name: main-workspace
+    - description: An optional workspace that allows providing a .docker/config.json file for Buildah to access the container registry. The file should be placed at the root of the Workspace with name config.json or .dockerconfigjson.
+      name: dockerconfig
+      optional: false
+    - description: AWS Credentials file to use for AMI Uploading
+      name: awscredentials
+      optional: true
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: bootc-image-build
+spec:
+  description: |-
+    Podman task builds source into a container image and then pushes it to a container registry.
+    Podman Task builds source into a container image using Project Atomic's Podman build tool.It uses Podman's support for building from Dockerfiles, using its buildah bud command.This command executes the directives in the Dockerfile to assemble a container image, then pushes that image to a container registry.
+  params:
+    - description: Reference of the image buildah will produce.
+      name: IMAGE
+      type: string
+      default: $(params.IMAGE_NAME)
+    - description: Reference of the image tags buildah will produce.
+      name: IMAGE_TAGS
+      type: string
+      default: $(params.IMAGE_TAGS)
+    - default: 'quay.io/containers/podman:latest'
+      description: The location of the buildah builder image.
+      name: BUILDER_IMAGE
+      type: string
+    - default: ./Containerfile
+      description: Path to the Containerfile to build.
+      name: DOCKERFILE
+      type: string
+    - default: .
+      description: Path to the directory to use as context.
+      name: CONTEXT
+      type: string
+    - default: 'true'
+      description: Verify the TLS on the registry endpoint (for push/pull to a non-TLS registry)
+      name: TLSVERIFY
+      type: string
+    - default: oci
+      description: 'The format of the built container, oci or docker'
+      name: FORMAT
+      type: string
+    - default: ''
+      description: Extra parameters passed for the build command when building images.
+      name: BUILD_EXTRA_ARGS
+      type: string
+    - default: ''
+      description: Extra parameters passed for the push command when pushing images.
+      name: PUSH_EXTRA_ARGS
+      type: string
+    - default: 'false'
+      description: Skip pushing the built image
+      name: SKIP_PUSH
+      type: string
+  steps:
+    - image: $(params.BUILDER_IMAGE)
+      name: build-and-push
+      script: |
+        #!/usr/bin/env bash
+        set -xe
+        TAGS=""
+
+        if [[ "$(workspaces.dockerconfig.bound)" == "true" ]]; then
+
+          # if config.json exists at workspace root, we use that
+          if test -f "$(workspaces.dockerconfig.path)/config.json"; then
+            export DOCKER_CONFIG="$(workspaces.dockerconfig.path)"
+
+          # else we look for .dockerconfigjson at the root
+          elif test -f "$(workspaces.dockerconfig.path)/.dockerconfigjson"; then
+            mkdir -p $HOME/.docker/
+            cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" "$HOME/.docker/config.json"
+            export DOCKER_CONFIG="$HOME/.docker"
+
+          # need to error out if neither files are present
+          else
+            echo "neither 'config.json' nor '.dockerconfigjson' found at workspace root"
+            exit 1
+          fi
+        fi
+
+        for tag in $(params.IMAGE_TAGS)
+        do
+          TAGS+="-t $(params.IMAGE):$tag "
+        done
+
+        podman build \
+        $(params.BUILD_EXTRA_ARGS) \
+        --format=$(params.FORMAT) \
+        --tls-verify=$(params.TLSVERIFY) \
+        -f $(params.DOCKERFILE) $TAGS $(params.CONTEXT)
+
+        [[ "$(params.SKIP_PUSH)" == "true" ]] && echo "Push skipped" && exit 0
+
+        for tag in $(params.IMAGE_TAGS)
+        do
+          podman push $(params.PUSH_EXTRA_ARGS) \
+          --tls-verify=$(params.TLSVERIFY) \
+          $(params.IMAGE):$tag
+        done
+
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - mountPath: /var/lib/containers
+          name: varlibcontainers
+        - mountPath: /dev/fuse
+          name: fuse
+      workingDir: $(workspaces.main-workspace.path)
+  volumes:
+    - emptyDir: {}
+      name: varlibcontainers
+    - name: fuse
+      hostPath:
+        path: /dev/fuse
+  workspaces:
+    - name: main-workspace
+    - description: An optional workspace that allows providing a .docker/config.json file for Podman to access the container registry. The file should be placed at the root of the Workspace with name config.json or .dockerconfigjson.
+      name: dockerconfig
+      optional: true
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: bootc-image-sign
+spec:
+  description: |-
+    Task to sign image with SIGSTORE Cosign.
+  params:
+    - description: Reference of the image to sign.
+      name: IMAGE
+      type: string
+      default: $(params.IMAGE_NAME)
+    - description: Reference of the image tags to sign.
+      name: IMAGE_TAGS
+      type: string
+      default: $(params.IMAGE_TAGS)
+    - default: 'quay.io/kubealex/ubi-cosign:latest'
+      description: The location of the cosign container image.
+      name: COSIGN_IMAGE
+      type: string
+    - default: k8s://default/cosign-key
+      description: Location of the key to sign images
+      name: COSIGN_KEY_LOCATION
+      type: string
+    - default: redhat
+      description: Passphrase of the key to sign images
+      name: COSIGN_KEY_PWD
+      type: string
+    - default: false
+      description: Boolean to manage key generation, defaults to false
+      name: COSIGN_GENERATE_KEYS
+      type: string
+  steps:
+    - image: $(params.COSIGN_IMAGE)
+      name: sign-image
+      script: |
+        #!/usr/bin/env bash
+        set -xe
+
+        if [[ "$(workspaces.dockerconfig.bound)" == "true" ]]; then
+
+          # if config.json exists at workspace root, we use that
+          if test -f "$(workspaces.dockerconfig.path)/config.json"; then
+            export DOCKER_CONFIG="$(workspaces.dockerconfig.path)"
+
+          # else we look for .dockerconfigjson at the root
+          elif test -f "$(workspaces.dockerconfig.path)/.dockerconfigjson"; then
+            mkdir -p $HOME/.docker/
+            cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" "$HOME/.docker/config.json"
+            export DOCKER_CONFIG="$HOME/.docker"
+
+          # need to error out if neither files are present
+          else
+            echo "neither 'config.json' nor '.dockerconfigjson' found at workspace root"
+            exit 1
+          fi
+        fi
+
+        if [[ "$(params.COSIGN_GENERATE_KEYS)" == "true" ]]; then
+          cosign generate-key-pair $(params.COSIGN_KEY_LOCATION)
+        fi
+
+        for tag in $(params.IMAGE_TAGS)
+        do
+          cosign sign --yes --key $(params.COSIGN_KEY_LOCATION) $(params.IMAGE):$tag
+        done
+
+      securityContext:
+        privileged: true
+      workingDir: $(workspaces.main-workspace.path)
+      env:
+      - name: COSIGN_PASSWORD
+        value: $(params.COSIGN_KEY_PWD)
+  workspaces:
+    - name: main-workspace
+    - description: An optional workspace that allows providing a .docker/config.json file for Podman to access the container registry. The file should be placed at the root of the Workspace with name config.json or .dockerconfigjson.
+      name: dockerconfig
+      optional: true
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: kubevirt-containerfile
+spec:
+  description: |-
+    Task to prepare the image for Kubevirt
+  steps:
+    - image: quay.io/lib/bash
+      name: create-containerfile
+      script: |
+        #!/usr/bin/env bash
+        set -xe
+        cat << EOF > Containerfile
+        FROM scratch
+        ADD --chown=107:107 ./output/qcow2/disk.qcow2 /disk/
+        EOF
+      securityContext:
+        privileged: true
+      workingDir: $(workspaces.main-workspace.path)
+  workspaces:
+    - name: main-workspace
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: kubernetes-actions
+spec:
+  description: >-
+    This task is the generic kubectl CLI task which can be used
+    to run all kinds of k8s commands
+  workspaces:
+    - name: manifest-dir
+      optional: true
+    - name: kubeconfig-dir
+      optional: true
+  results:
+    - name: output-result
+      description: some result can be emitted if someone wants to.
+  params:
+    - name: script
+      description: The Kubernetes CLI script to run
+      type: string
+      default: "kubectl $@"
+    - name: args
+      description: The Kubernetes CLI arguments to run
+      type: array
+      default:
+        - "help"
+    - name: image
+      default: gcr.io/cloud-builders/kubectl:latest
+      description: Kubectl wrapper image
+    - name: QCOW_IMAGE_NAME
+      default: quay.io/kubealex/centos-bootc-demo
+    - name: QCOW_IMAGE_TAG
+      default: kubevirt-qcow2
+    - default: centos-bootc-vm
+      name: VM_NAME
+      type: string
+      description: 'VM Name'
+    - default: "2"
+      name: VM_CPU
+      type: string
+      description: 'VM CPU Count'
+    - default: 2Gi
+      name: VM_MEMORY
+      type: string
+      description: 'VM Memory'
+  steps:
+    - name: kubectl
+      image: $(params.image)
+      script: |
+        #!/usr/bin/env bash
+
+        [[ "$(workspaces.manifest-dir.bound)" == "true" ]] && \
+        cd $(workspaces.manifest-dir.path)
+
+        [[ "$(workspaces.kubeconfig-dir.bound)" == "true" ]] && \
+        [[ -f $(workspaces.kubeconfig-dir.path)/kubeconfig ]] && \
+        export KUBECONFIG=$(workspaces.kubeconfig-dir.path)/kubeconfig
+
+        $(params.script)
+
+      args:
+        - "$(params.args)"

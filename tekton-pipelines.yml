@@ -1,0 +1,639 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: bootc-image-builder
+spec:
+  params:
+    - default: quay.io/kubealex/centos-bootc-demo
+      name: SOURCE_IMAGE_NAME
+      type: string
+      description: 'Image to convert - i.e. quay.io/kubealex/centos-bootc-demo'
+    - default: latest
+      name: SOURCE_IMAGE_TAG
+      type: string
+      description: 'Image tag'
+    - default: qcow2
+      name: DESTINATION_IMAGE_FORMAT
+      type: string
+      description: 'Resulting image format - allowed: qcow2, anaconda-iso, vmdk, raw, ami, gcp'
+    - default: |
+        [[customizations.user]]
+        name = "sysadmin"
+        password = "redhat"
+        groups = ["wheel"]
+      description: config.toml content for customizations
+      name: CONFIG_TOML_CONTENT
+      type: string
+    - default: 'true'
+      description: TLS Verification
+      name: TLS_VERIFY
+      type: string
+    - default: ''
+      description: AWS AMI Name
+      name: AWS_AMI_NAME
+      type: string
+    - default: ''
+      description: AWS S3 Bucket
+      name: AWS_S3_BUCKET
+      type: string
+    - default: ''
+      description: AWS S3 Region
+      name: AWS_S3_REGION
+      type: string
+    - default: 'false'
+      description: Generate QCOW2 Container image for KubeVirt ContainerDisk
+      name: KUBEVIRT_IMAGE_BUILD
+      type: string
+    - description: Reference to logically bound images, space separated
+      name: LOGICALLY_BOUND_IMAGES
+      type: string
+      default: ""
+  tasks:
+    - name: bootc-image-builder
+      params:
+        - name: SOURCE_IMAGE
+          value: $(params.SOURCE_IMAGE_NAME)
+        - name: SOURCE_IMAGE_TAG
+          value: $(params.SOURCE_IMAGE_TAG)
+        - name: BUILDER_IMAGE
+          value: 'quay.io/centos-bootc/bootc-image-builder:latest'
+        - name: DEST_FORMAT
+          value: $(params.DESTINATION_IMAGE_FORMAT)
+        - name: CONFIG_TOML_CONTENT
+          value: $(params.CONFIG_TOML_CONTENT)
+        - name: TLS_VERIFY
+          value: 'true'
+        - name: AWS_AMI_NAME
+          value: $(params.AWS_AMI_NAME)
+        - name: AWS_S3_BUCKET
+          value: $(params.AWS_S3_BUCKET)
+        - name: AWS_S3_REGION
+          value: $(params.AWS_S3_REGION)
+        - name: LOGICALLY_BOUND_IMAGES
+          value: $(params.LOGICALLY_BOUND_IMAGES)
+      taskRef:
+        kind: Task
+        name: bootc-image-builder
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+        - name: awscredentials
+          workspace: aws-creds
+
+    - name: kubevirt-containerfile-create
+      when:
+        - input: "$(params.KUBEVIRT_IMAGE_BUILD)"
+          operator: in
+          values: ["true"]
+      runAfter:
+        - bootc-image-builder
+      taskRef:
+        kind: Task
+        name: kubevirt-containerfile
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+
+    - name: kubevirt-image-build
+      when:
+        - input: "$(params.KUBEVIRT_IMAGE_BUILD)"
+          operator: in
+          values: ["true"]
+      params:
+        - name: IMAGE
+          value: $(params.SOURCE_IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: kubevirt-qcow2
+      runAfter:
+        - kubevirt-containerfile-create
+      taskRef:
+        kind: Task
+        name: bootc-image-build
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+  workspaces:
+    - name: main-workspace
+    - name: registry-creds
+    - name: aws-creds
+      optional: true
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: kubevirt-image-deploy
+spec:
+  params:
+    - default: quay.io/kubealex/centos-bootc-demo
+      name: QCOW_IMAGE_NAME
+      type: string
+      description: 'Image to convert - i.e. quay.io/kubealex/centos-bootc-demo'
+    - default: kubevirt-qcow2
+      name: QCOW_IMAGE_TAG
+      type: string
+      description: 'Image tag'
+    - default: centos-bootc-vm
+      name: VM_NAME
+      type: string
+      description: 'VM Name'
+    - default: 2
+      name: VM_CPU
+      type: string
+      description: 'VM CPU Count'
+    - default: 2Gi
+      name: VM_MEMORY
+      type: string
+      description: 'VM Memory'
+    - default: 20Gi
+      name: VM_DISK_SIZE
+      type: string
+      description: 'VM Disk Size'
+  tasks:
+    - name: kubernetes-actions
+      params:
+        - name: QCOW_IMAGE_NAME
+          value: $(params.QCOW_IMAGE_NAME)
+        - name: QCOW_IMAGE_TAG
+          value: $(params.QCOW_IMAGE_TAG)
+        - name: script
+          value: |
+            cat <<EOF | kubectl apply -f -
+            ---
+            apiVersion: kubevirt.io/v1
+            kind: VirtualMachine
+            metadata:
+              labels:
+                kubevirt.io/vm: vm-bootc-kubevirt
+              name: $(params.VM_NAME)
+            spec:
+              runStrategy: Always
+              dataVolumeTemplates:
+              - metadata:
+                  creationTimestamp: null
+                  name: $(params.VM_NAME)-dv
+                spec:
+                  pvc:
+                    accessModes:
+                    - ReadWriteMany
+                    resources:
+                      requests:
+                        storage: 20Gi
+                    storageClassName: ceph-filesystem
+                  source:
+                    registry:
+                      url: docker://$(params.QCOW_IMAGE_NAME):$(params.QCOW_IMAGE_TAG)
+              template:
+                metadata:
+                  labels:
+                    kubevirt.io/vm: $(params.VM_NAME)-kubevirt
+                spec:
+                  domain:
+                    devices:
+                      disks:
+                      - disk:
+                          bus: virtio
+                        name: datavolumedisk1
+                    resources:
+                      requests:
+                        memory: $(params.VM_MEMORY)
+                    firmware:
+                      bootloader:
+                        efi:
+                          secureBoot: false
+                    cpu:
+                      cores: $(params.VM_CPU)
+                  terminationGracePeriodSeconds: 0
+                  volumes:
+                  - dataVolume:
+                      name: $(params.VM_NAME)-dv
+                    name: datavolumedisk1
+            EOF
+      taskRef:
+        kind: Task
+        name: kubernetes-actions
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: bootc-end-to-end-pipeline
+spec:
+  params:
+    - description: URL of the repository where Containerfile is stored
+      name: GIT_REPOSITORY
+      type: string
+    - default: main
+      description: URL of the repository where Containerfile is stored
+      name: GIT_REPOSITORY_BRANCH
+      type: string
+    - default: ./Containerfile
+      description: 'Containerfile path, relative'
+      name: CONTAINERFILE_PATH
+      type: string
+    - default: .
+      description: 'Podman Build Context'
+      name: BUILD_CONTEXT
+      type: string
+    - description: 'Name of the image to create, i.e. quay.io/kubealex/centos-bootc-demo'
+      name: IMAGE_NAME
+      type: string
+    - description: 'Tags, separated by a space, to apply to the image'
+      name: IMAGE_TAGS
+      type: string
+    - default: k8s://default/cosign-key
+      description: Location of the key to sign images
+      name: COSIGN_KEY_LOCATION
+      type: string
+    - default: redhat
+      description: Passphrase of the key to sign images
+      name: COSIGN_KEY_PWD
+      type: string
+    - default: false
+      description: Boolean to manage key generation, defaults to false
+      name: COSIGN_GENERATE_KEYS
+      type: string
+    - default: latest
+      name: SOURCE_IMAGE_TAG
+      type: string
+      description: 'Image tag'
+    - description: Reference to logically bound images, space separated
+      name: LOGICALLY_BOUND_IMAGES
+      type: string
+      default: ""
+    - default: qcow2
+      name: DESTINATION_IMAGE_FORMAT
+      type: string
+      description: 'Resulting image format - allowed: qcow2, anaconda-iso, vmdk, raw, ami, gcp'
+    - default: |
+        [[customizations.user]]
+        name = "sysadmin"
+        password = "redhat"
+        groups = ["wheel"]
+      description: config.toml content for customizations
+      name: CONFIG_TOML_CONTENT
+      type: string
+    - default: 'true'
+      description: TLS Verification
+      name: TLS_VERIFY
+      type: string
+    - default: ''
+      description: AWS AMI Name
+      name: AWS_AMI_NAME
+      type: string
+    - default: ''
+      description: AWS S3 Bucket
+      name: AWS_S3_BUCKET
+      type: string
+    - default: ''
+      description: AWS S3 Region
+      name: AWS_S3_REGION
+      type: string
+    - default: 'false'
+      description: Generate QCOW2 Container image for KubeVirt ContainerDisk
+      name: KUBEVIRT_IMAGE_BUILD
+      type: string
+    - default: quay.io/kubealex/centos-bootc-demo
+      name: QCOW_IMAGE_NAME
+      type: string
+      description: 'Image to convert - i.e. quay.io/kubealex/centos-bootc-demo'
+    - default: kubevirt-qcow2
+      name: QCOW_IMAGE_TAG
+      type: string
+      description: 'Image tag'
+    - default: centos-bootc-vm
+      name: VM_NAME
+      type: string
+      description: 'VM Name'
+    - default: 2
+      name: VM_CPU
+      type: string
+      description: 'VM CPU Count'
+    - default: 2Gi
+      name: VM_MEMORY
+      type: string
+      description: 'VM Memory'
+    - default: 20Gi
+      name: VM_DISK_SIZE
+      type: string
+      description: 'VM Disk Size'
+  tasks:
+    - name: git-clone
+      params:
+        - name: url
+          value: $(params.GIT_REPOSITORY)
+        - name: revision
+          value: $(params.GIT_REPOSITORY_BRANCH)
+      taskRef:
+        kind: Task
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: main-workspace
+    - name: bootc-image-build
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: $(params.IMAGE_TAGS)
+        - name: BUILDER_IMAGE
+          value: 'quay.io/containers/podman:latest'
+        - name: DOCKERFILE
+          value: $(params.CONTAINERFILE_PATH)
+        - name: CONTEXT
+          value: $(params.BUILD_CONTEXT)
+        - name: TLSVERIFY
+          value: 'true'
+        - name: FORMAT
+          value: oci
+        - name: BUILD_EXTRA_ARGS
+          value: ''
+        - name: PUSH_EXTRA_ARGS
+          value: ''
+        - name: SKIP_PUSH
+          value: 'false'
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: Task
+        name: bootc-image-build
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+
+    - name: bootc-image-sign
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: $(params.IMAGE_TAGS)
+        - name: COSIGN_KEY_LOCATION
+          value: $(params.COSIGN_KEY_LOCATION)
+        - name: COSIGN_KEY_PWD
+          value: $(params.COSIGN_KEY_PWD)
+        - name: COSIGN_GENERATE_KEYS
+          value: $(params.COSIGN_GENERATE_KEYS)
+      runAfter:
+        - bootc-image-build
+      taskRef:
+        kind: Task
+        name: bootc-image-sign
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+    - name: bootc-image-builder
+      params:
+        - name: SOURCE_IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: SOURCE_IMAGE_TAG
+          value: $(params.SOURCE_IMAGE_TAG)
+        - name: BUILDER_IMAGE
+          value: 'quay.io/centos-bootc/bootc-image-builder:latest'
+        - name: DEST_FORMAT
+          value: $(params.DESTINATION_IMAGE_FORMAT)
+        - name: CONFIG_TOML_CONTENT
+          value: $(params.CONFIG_TOML_CONTENT)
+        - name: TLS_VERIFY
+          value: 'true'
+        - name: AWS_AMI_NAME
+          value: $(params.AWS_AMI_NAME)
+        - name: AWS_S3_BUCKET
+          value: $(params.AWS_S3_BUCKET)
+        - name: AWS_S3_REGION
+          value: $(params.AWS_S3_REGION)
+        - name: LOGICALLY_BOUND_IMAGES
+          value: $(params.LOGICALLY_BOUND_IMAGES)
+      runAfter:
+        - bootc-image-sign
+      taskRef:
+        kind: Task
+        name: bootc-image-builder
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+        - name: awscredentials
+          workspace: aws-creds
+
+    - name: kubevirt-containerfile-create
+      when:
+        - input: "$(params.KUBEVIRT_IMAGE_BUILD)"
+          operator: in
+          values: ["true"]
+      runAfter:
+        - bootc-image-builder
+      taskRef:
+        kind: Task
+        name: kubevirt-containerfile
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+
+    - name: kubevirt-image-build
+      when:
+        - input: "$(params.KUBEVIRT_IMAGE_BUILD)"
+          operator: in
+          values: ["true"]
+      params:
+        - name: IMAGE
+          value: $(params.QCOW_IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: kubevirt-qcow2
+      runAfter:
+        - kubevirt-containerfile-create
+      taskRef:
+        kind: Task
+        name: bootc-image-build
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+    - name: kubernetes-actions
+      params:
+        - name: QCOW_IMAGE_NAME
+          value: $(params.QCOW_IMAGE_NAME)
+        - name: QCOW_IMAGE_TAG
+          value: $(params.QCOW_IMAGE_TAG)
+        - name: script
+          value: |
+            cat <<EOF | kubectl apply -f -
+            ---
+            apiVersion: kubevirt.io/v1
+            kind: VirtualMachine
+            metadata:
+              labels:
+                kubevirt.io/vm: vm-bootc-kubevirt
+              name: $(params.VM_NAME)
+            spec:
+              runStrategy: Always
+              dataVolumeTemplates:
+              - metadata:
+                  creationTimestamp: null
+                  name: $(params.VM_NAME)-dv
+                spec:
+                  pvc:
+                    accessModes:
+                    - ReadWriteMany
+                    resources:
+                      requests:
+                        storage: 20Gi
+                    storageClassName: ceph-filesystem
+                  source:
+                    registry:
+                      url: docker://$(params.QCOW_IMAGE_NAME):$(params.QCOW_IMAGE_TAG)
+              template:
+                metadata:
+                  labels:
+                    kubevirt.io/vm: $(params.VM_NAME)-kubevirt
+                spec:
+                  domain:
+                    devices:
+                      disks:
+                      - disk:
+                          bus: virtio
+                        name: datavolumedisk1
+                    resources:
+                      requests:
+                        memory: $(params.VM_MEMORY)
+                    firmware:
+                      bootloader:
+                        efi:
+                          secureBoot: false
+                    cpu:
+                      cores: $(params.VM_CPU)
+                  terminationGracePeriodSeconds: 0
+                  volumes:
+                  - dataVolume:
+                      name: $(params.VM_NAME)-dv
+                    name: datavolumedisk1
+            EOF
+      taskRef:
+        kind: Task
+        name: kubernetes-actions
+      runAfter:
+        - kubevirt-image-build
+  workspaces:
+    - name: main-workspace
+    - name: registry-creds
+    - name: aws-creds
+      optional: true
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: centos-bootc-image-build
+spec:
+  params:
+    - description: URL of the repository where Containerfile is stored
+      name: GIT_REPOSITORY
+      type: string
+    - default: main
+      description: URL of the repository where Containerfile is stored
+      name: GIT_REPOSITORY_BRANCH
+      type: string
+    - default: ./Containerfile
+      description: 'Containerfile path, relative'
+      name: CONTAINERFILE_PATH
+      type: string
+    - default: .
+      description: 'Podman Build Context'
+      name: BUILD_CONTEXT
+      type: string
+    - description: 'Name of the image to create, i.e. quay.io/kubealex/centos-bootc-demo'
+      name: IMAGE_NAME
+      type: string
+    - description: 'Tags, separated by a space, to apply to the image'
+      name: IMAGE_TAGS
+      type: string
+    - default: k8s://default/cosign-key
+      description: Location of the key to sign images
+      name: COSIGN_KEY_LOCATION
+      type: string
+    - default: redhat
+      description: Passphrase of the key to sign images
+      name: COSIGN_KEY_PWD
+      type: string
+    - default: false
+      description: Boolean to manage key generation, defaults to false
+      name: COSIGN_GENERATE_KEYS
+      type: string
+  tasks:
+    - name: git-clone
+      params:
+        - name: url
+          value: $(params.GIT_REPOSITORY)
+        - name: revision
+          value: $(params.GIT_REPOSITORY_BRANCH)
+      taskRef:
+        kind: Task
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: main-workspace
+    - name: bootc-image-build
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: $(params.IMAGE_TAGS)
+        - name: BUILDER_IMAGE
+          value: 'quay.io/containers/podman:latest'
+        - name: DOCKERFILE
+          value: $(params.CONTAINERFILE_PATH)
+        - name: CONTEXT
+          value: $(params.BUILD_CONTEXT)
+        - name: TLSVERIFY
+          value: 'true'
+        - name: FORMAT
+          value: oci
+        - name: BUILD_EXTRA_ARGS
+          value: ''
+        - name: PUSH_EXTRA_ARGS
+          value: ''
+        - name: SKIP_PUSH
+          value: 'false'
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: Task
+        name: bootc-image-build
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+
+    - name: bootc-image-sign
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE_NAME)
+        - name: IMAGE_TAGS
+          value: $(params.IMAGE_TAGS)
+        - name: COSIGN_KEY_LOCATION
+          value: $(params.COSIGN_KEY_LOCATION)
+        - name: COSIGN_KEY_PWD
+          value: $(params.COSIGN_KEY_PWD)
+        - name: COSIGN_GENERATE_KEYS
+          value: $(params.COSIGN_GENERATE_KEYS)
+      runAfter:
+        - bootc-image-build
+      taskRef:
+        kind: Task
+        name: bootc-image-sign
+      workspaces:
+        - name: main-workspace
+          workspace: main-workspace
+        - name: dockerconfig
+          workspace: registry-creds
+  workspaces:
+    - name: main-workspace
+    - name: registry-creds
