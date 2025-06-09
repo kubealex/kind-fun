@@ -105,6 +105,10 @@ spec:
         generateName: bootc-image-builder-
         namespace: default
       spec:
+        timeouts:
+          pipeline: "3h0m0s"
+          tasks: "1h0m0s"
+          finally: "0h0m20s"
         pipelineRef:
           name: bootc-end-to-end-pipeline
         params:
@@ -121,7 +125,7 @@ spec:
           - name: IMAGE_TAGS
             value: latest app $(tt.params.git_revision)
           - name: COSIGN_GENERATE_KEYS
-            value: false
+            value: true
           - name: KUBEVIRT_IMAGE_BUILD
             value: true
           - name: LOGICALLY_BOUND_IMAGES
